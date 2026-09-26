@@ -7,8 +7,6 @@ if [ -f "$APP" ]; then
 fi
 # 清理 0.1.1 早期构建写错位置的图标（var/jb/var/jb）
 rm -rf /var/jb/var/jb/Applications 2>/dev/null || true
-# 只注册自己的 App，且必须用 -p 指定路径；
-# 绝不跑裸 uicache —— root 下会把 /var/jb/Applications 全部图标缓存清掉
-UIC=/var/jb/usr/bin/uicache
-[ -x "$UIC" ] && "$UIC" -p /var/jb/Applications/DebPackUI.app >/dev/null 2>&1 || true
+# 不跑任何 uicache：root 下安装过程中执行 uicache（连 -p 也是）会重置
+# /var/jb/Applications 全部图标注册缓存（iOS 16.5 实测）。图标注册交给 Sileo 自己刷。
 exit 0
