@@ -7,5 +7,8 @@ if [ -f "$APP" ]; then
 fi
 # 清理 0.1.1 早期构建写错位置的图标（var/jb/var/jb）
 rm -rf /var/jb/var/jb/Applications 2>/dev/null || true
-uicache -p /var/jb/Applications/DebPackUI.app >/dev/null 2>&1 || uicache >/dev/null 2>&1 || true
+# 只注册自己的 App，且必须用 -p 指定路径；
+# 绝不跑裸 uicache —— root 下会把 /var/jb/Applications 全部图标缓存清掉
+UIC=/var/jb/usr/bin/uicache
+[ -x "$UIC" ] && "$UIC" -p /var/jb/Applications/DebPackUI.app >/dev/null 2>&1 || true
 exit 0
