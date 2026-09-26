@@ -1,0 +1,9 @@
+#!/bin/bash
+# App 需要 setuid root 才能读取 dpkg 数据库
+APP="/var/jb/Applications/DebPackUI.app/DebPackUI"
+if [ -f "$APP" ]; then
+    chown root:wheel "$APP"
+    chmod 4755 "$APP"
+fi
+uicache -p /var/jb/Applications/DebPackUI.app >/dev/null 2>&1 || uicache >/dev/null 2>&1 || true
+exit 0
