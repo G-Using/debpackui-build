@@ -8,6 +8,12 @@ extern char **environ;
 
 /* ---------------- 命令行调用 ---------------- */
 
+static BOOL IsDirAtForDiag(NSString *p) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    return [fm fileExistsAtPath:p isDirectory:&isDir] && isDir;
+}
+
 static NSString *DebpackPath(void) {
     NSArray<NSString *> *cands = @[
         @"/var/jb/usr/bin/debpack",
@@ -21,7 +27,8 @@ static NSString *DebpackPath(void) {
     return nil;
 }
 
-static NSString *RunCapture(NSString *tool, NSArray<NSString *> *args) {
+static NSString *RunCapture(NSString *tool, NSArray<NSString *> *args, int *spawnRc) {
+    if (spawnRc) *spawnRc = -1;
     int pfd[2];
     if (pipe(pfd) != 0) return @"";
 
@@ -60,6 +67,7 @@ static NSString *RunCapture(NSString *tool, NSArray<NSString *> *args) {
 
     int status = 0;
     waitpid(pid, &status, 0);
+    if (spawnRc) *spawnRc = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
     NSString *s = [[NSString alloc] initWithData:buf encoding:NSUTF8StringEncoding];
     return s ?: @"";
 }
@@ -124,7 +132,7 @@ static int RunStreaming(NSString *tool, NSArray<NSString *> *args, void (^line)(
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"正在导出";
+    if (self.title == nil) self.title = @"正在导出";
     self.view.backgroundColor = [UIColor systemBackgroundColor];
 
     self.textView = [[UITextView alloc] initWithFrame:self.view.bounds];
@@ -155,6 +163,10 @@ static int RunStreaming(NSString *tool, NSArray<NSString *> *args, void (^line)(
             [self.textView scrollRangeToVisible:r];
         }
     });
+}
+
+- (void)setText:(NSString *)t {
+    self.textView.text = t ?: @"";
 }
 
 @end
@@ -230,7 +242,8 @@ static int RunStreaming(NSString *tool, NSArray<NSString *> *args, void (^line)(
     self.title = @"读取中…";
     __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSString *out = RunCapture(tool, @[@"list", @"--json"]);
+        int spawnRc = -1;
+        NSString *out = RunCapture(tool, @[@"list", @"--json"], &spawnRc);
         NSData *d = [out dataUsingEncoding:NSUTF8StringEncoding];
         NSArray *arr = nil;
         if (d) arr = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
@@ -238,14 +251,37 @@ static int RunStreaming(NSString *tool, NSArray<NSString *> *args, void (^line)(
             __strong typeof(weakSelf) self = weakSelf;
             if (!self) return;
             if (![arr isKindOfClass:[NSArray class]] || arr.count == 0) {
-                self.title = @"DebPack";
-                [self showAlert:@"没能读到已安装列表。请以 root 运行（App 需 setuid），或用 SSH 执行 debpack list 看看报错。"];
+                [self showDiagnostics:tool spawnRc:spawnRc output:out];
                 return;
             }
             self.allItems = arr;
             [self applyFilter:@""];
         });
     });
+}
+
+- (void)showDiagnostics:(NSString *)tool spawnRc:(int)spawnRc output:(NSString *)out {
+    NSMutableString *msg = [NSMutableString string];
+    [msg appendFormat:@"euid = %d %@\n", geteuid(),
+          geteuid() == 0 ? @"(root，正常)" : @"(不是 root！setuid 没生效)"];
+    [msg appendFormat:@"工具路径: %@\n", tool ?: @"(未找到)"];
+    [msg appendFormat:@"/var/jb 存在: %@\n", IsDirAtForDiag(@"/var/jb") ? @"是" : @"否"];
+    [msg appendFormat:@"spawn 退出码: %d\n", spawnRc];
+    [msg appendFormat:@"输出长度: %lu\n", (unsigned long)out.length];
+    [msg appendString:@"\n===== 命令输出 =====\n"];
+    if (out.length == 0) {
+        [msg appendString:@"(空)"];
+    } else {
+        NSString *head = out.length > 600 ? [out substringToIndex:600] : out;
+        [msg appendString:head];
+    }
+
+    LogViewController *log = [[LogViewController alloc] init];
+    log.title = @"诊断信息";
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:log];
+    [self presentViewController:nav animated:YES completion:^{
+        [log setText:msg];
+    }];
 }
 
 - (void)applyFilter:(NSString *)query {
